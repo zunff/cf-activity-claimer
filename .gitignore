@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# 登录态（含 cookie，切勿提交）
+auth.json
+
+# 运行产物
+output/
+config.json
+
+# 本地个人配置（Claude Code 权限设置等）
+.claude/settings.local.json
+

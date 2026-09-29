@@ -1,0 +1,31 @@
+{
+  "auth_file": "auth.json",
+  "output_dir": "output",
+  "browser": {
+    "headless": false,
+    "channel": "chrome",
+    "nav_timeout_ms": 60000,
+    "page_wait_ms": 6000
+  },
+  "claim": {
+    "only_in_progress": true,
+    "click_delay": [0.8, 2.0],
+    "result_wait_ms": 2500,
+    "screenshot": true
+  },
+  "activities": {
+    "tag_id": "1487",
+    "pagesize": 50,
+    "max_pages": 10,
+    "extra_urls": []
+  },
+  "notify": {
+    "webhook": ""
+  },
+  "ui": {
+    "host": "127.0.0.1",
+    "port": 8765,
+    "headless": true
+  },
+  "login_timeout_s": 600
+}

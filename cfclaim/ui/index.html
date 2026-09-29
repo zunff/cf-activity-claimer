@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CF 活动自动领取</title>
+<style>
+  :root{--bg:#0f1216;--panel:#171b22;--line:#252b36;--fg:#e6e9ef;--mut:#8b93a3;
+        --ok:#33c27f;--warn:#e2b341;--bad:#e2574c;--acc:#f0a133}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,"PingFang SC",system-ui,sans-serif;
+       background:var(--bg);color:var(--fg)}
+  header{display:flex;align-items:center;gap:12px;padding:14px 20px;
+         border-bottom:1px solid var(--line);background:#12151b;position:sticky;top:0;z-index:5}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  .pill{padding:3px 10px;border-radius:999px;font-size:12px;background:#232a35;color:var(--mut)}
+  .pill.logging_in,.pill.claiming{background:#3a2f12;color:var(--warn)}
+  .pill.done{background:#123322;color:var(--ok)}
+  .pill.error{background:#3a1714;color:var(--bad)}
+  .msg{color:var(--mut);margin-left:auto;font-size:13px}
+  main{display:grid;grid-template-columns:340px 1fr;gap:16px;padding:16px;align-items:start}
+  @media(max-width:820px){main{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .card h2{font-size:13px;margin:0 0 12px;color:var(--mut);font-weight:600;letter-spacing:.5px}
+  .btns{display:flex;flex-wrap:wrap;gap:8px}
+  button{background:#232a35;color:var(--fg);border:1px solid var(--line);border-radius:8px;
+         padding:9px 14px;font-size:13px;cursor:pointer;transition:.15s}
+  button:hover{background:#2b3341}
+  button.primary{background:var(--acc);color:#1a1206;border-color:transparent;font-weight:600}
+  button.primary:hover{background:#ffb54d}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .qrbox{margin-top:16px;display:flex;flex-direction:column;align-items:center;gap:10px;
+         min-height:230px;justify-content:center;border:1px dashed var(--line);border-radius:10px}
+  .qrbox img{width:210px;height:210px;image-rendering:pixelated;border-radius:8px;
+             background:#fff;padding:8px}
+  .qrbox .ph{color:var(--mut);font-size:13px;text-align:center;padding:24px}
+  .step{font-size:13px;color:var(--acc);min-height:20px}
+  .acts{display:flex;flex-direction:column;gap:8px;max-height:540px;overflow:auto}
+  .act{border:1px solid var(--line);border-radius:9px;padding:10px 12px}
+  .act .t{font-size:13px;margin-bottom:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .act .u{font-size:11px;color:var(--mut);word-break:break-all}
+  .res{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+  .tag{font-size:11px;padding:2px 8px;border-radius:6px;background:#232a35;color:var(--mut)}
+  .tag.ok{background:#123322;color:var(--ok)}
+  .tag.warn{background:#3a2f12;color:var(--warn)}
+  .tag.bad{background:#3a1714;color:var(--bad)}
+  .log{margin:0 16px 20px;background:#0b0e12;border:1px solid var(--line);border-radius:12px;
+       padding:12px;height:220px;overflow:auto;font:12px/1.7 ui-monospace,Menlo,monospace;
+       color:#9aa4b2}
+  .log div{white-space:pre-wrap}
+  .empty{color:var(--mut);font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <h1>CF 活动自动领取</h1>
+  <span id="status" class="pill">空闲</span>
+  <span id="msg" class="msg"></span>
+</header>
+<main>
+  <section class="card">
+    <h2>登录</h2>
+    <div class="btns">
+      <button id="btnLogin" class="primary">开始登录（扫码）</button>
+    </div>
+    <div class="qrbox" id="qrbox">
+      <div class="ph">点「开始登录」，二维码会显示在这里<br>用手机 QQ 扫码即可</div>
+    </div>
+  </section>
+  <section class="card">
+    <h2>活动</h2>
+    <div class="btns" style="margin-bottom:12px">
+      <button id="btnList">刷新活动列表</button>
+      <button id="btnClaim" class="primary">一键领取全部</button>
+    </div>
+    <div class="acts" id="acts"><div class="empty">还没有数据，点「刷新活动列表」。</div></div>
+  </section>
+</main>
+<div class="log" id="log"></div>
+<script>
+const $ = s => document.querySelector(s);
+let qrSeq = -1, busy = false;
+
+const STATUS_TXT = {idle:"空闲", logging_in:"登录中", claiming:"领取中", done:"完成", error:"出错"};
+const TAG = {
+  "成功":"ok", "成功(接口)":"ok", "已领过":"ok",
+  "需登录":"bad", "点击失败":"bad", "未知":"warn", "未达标":"warn", "无可领取":"warn"
+};
+
+$("#btnLogin").onclick = () => fetch("/api/login", {method:"POST"});
+$("#btnClaim").onclick = () => fetch("/api/claim", {method:"POST"});
+$("#btnList").onclick  = () => fetch("/api/list",  {method:"POST"});
+
+function esc(s){ return (s||"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+async function tick(){
+  let st;
+  try { st = await (await fetch("/api/state")).json(); } catch(e){ return; }
+
+  $("#status").textContent = STATUS_TXT[st.status] || st.status;
+  $("#status").className = "pill " + st.status;
+  $("#msg").textContent = st.message || "";
+  busy = st.status === "logging_in" || st.status === "claiming";
+  $("#btnLogin").disabled = busy;
+  $("#btnClaim").disabled = busy;
+  $("#btnList").disabled  = busy;
+
+  const box = $("#qrbox");
+  if (st.has_qr){
+    let img = box.querySelector("img");
+    if (!img){
+      box.innerHTML = "";
+      img = document.createElement("img");
+      box.appendChild(img);
+      const s = document.createElement("div");
+      s.className = "step"; s.id = "step";
+      box.appendChild(s);
+    }
+    if (qrSeq !== st.qr_seq){ img.src = "/api/qr?v=" + st.qr_seq; qrSeq = st.qr_seq; }
+    $("#step").textContent = st.login_step || "";
+  } else if (st.status !== "logging_in" && box.querySelector("img")){
+    qrSeq = -1;
+    box.innerHTML = '<div class="ph">点「开始登录」，二维码会显示在这里<br>用手机 QQ 扫码即可</div>';
+  }
+
+  const acts = $("#acts");
+  if (st.activities && st.activities.length){
+    acts.innerHTML = st.activities.map(a => {
+      const rs = (st.results||[]).filter(r => r.activity === a.title);
+      const badges = rs.map(r =>
+        `<span class="tag ${TAG[r.outcome]||''}" title="${esc(r.element)} ${esc(r.detail||'')}">${esc(r.outcome)}</span>`
+      ).join("");
+      const rng = a.range ? `<span class="tag">${esc(a.range)}</span>` : "";
+      return `<div class="act"><div class="t">${esc(a.title)} ${rng}</div>
+              <div class="u">${esc(a.url)}</div>
+              ${badges ? `<div class="res">${badges}</div>` : ""}</div>`;
+    }).join("");
+  }
+
+  const log = $("#log");
+  log.innerHTML = (st.logs||[]).map(l => `<div>${esc(l)}</div>`).join("");
+  log.scrollTop = log.scrollHeight;
+}
+
+setInterval(tick, 1000);
+tick();
+</script>
+</body>
+</html>
